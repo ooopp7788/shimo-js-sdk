@@ -53,9 +53,20 @@ import { LoadingSvg } from './assets/loading'
 const globalThis = getGlobal()
 const AUD = 'smjssdk'
 const SM_PARAMS_KEY = 'smParams'
+const SM_CID_KEY = '_sm_cid'
 const SUPPORTED_LANGUAGES = ['zh-CN', 'en', 'ja', 'ar-SA', 'ru-RU']
 
 export const MessageEvent = InvokeMethod
+
+function generateSmCid() {
+  const date = new Date().toISOString().slice(0, 10).replace(/-/g, '')
+  const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ'
+  let rand = ''
+  for (let i = 0; i < 6; i++) {
+    rand += chars.charAt(Math.floor(Math.random() * chars.length))
+  }
+  return `SD${date}${rand}`
+}
 
 export class OfficeSDK extends TinyEmitter {
   /**
@@ -344,6 +355,7 @@ export class OfficeSDK extends TinyEmitter {
       this.connectOptions.container.appendChild(this.element)
 
       this.editor = this.initEditor()
+      await this.syncInitCredentials()
 
       /**
        * 等待编辑器 ReadyState 变化回调
@@ -490,6 +502,8 @@ export class OfficeSDK extends TinyEmitter {
 
   private async initIframe() {
     const options = this.connectOptions
+    this.getValidatedCredentials()
+    const smCid = generateSmCid()
 
     const iframe = document.createElement('iframe')
     iframe.style.border = 'none'
@@ -525,6 +539,7 @@ export class OfficeSDK extends TinyEmitter {
       url.searchParams.set('deviceMode', options.deviceMode.trim())
     }
 
+    url.searchParams.set(SM_CID_KEY, smCid)
     url.searchParams.set(SM_PARAMS_KEY, this.startParams.toString())
 
     if (options.showLoadingEffect) {
@@ -541,26 +556,35 @@ export class OfficeSDK extends TinyEmitter {
 
     url.searchParams.set('jsver', process.env.VERSION ?? '')
 
-    const token = assert<string>(
-      options.token,
-      notEmptyString,
-      `"token" is missing or empty: "${options.token}"`
-    )
-
-    const signature = assert<string>(
-      options.signature,
-      notEmptyString,
-      `"signature" is missing or empty: "${options.signature}"`
-    )
-
-    url.searchParams.set('token', token)
-    url.searchParams.set('signature', signature)
     url.searchParams.set('uuid', this.uuid)
     this.userUuid && url.searchParams.set('userUuid', this.userUuid)
 
     iframe.src = url.toString()
 
     return iframe
+  }
+
+  private getValidatedCredentials(): Credentials {
+    return {
+      token: assert<string>(
+        this.connectOptions.token,
+        notEmptyString,
+        `"token" is missing or empty: "${this.connectOptions.token}"`
+      ),
+      signature: assert<string>(
+        this.connectOptions.signature,
+        notEmptyString,
+        `"signature" is missing or empty: "${this.connectOptions.signature}"`
+      )
+    }
+  }
+
+  private async syncInitCredentials() {
+    await this.channel.invoke(
+      InvokeMethod.SetCredentials,
+      [this.getValidatedCredentials()],
+      { audience: AUD }
+    )
   }
 
   private initChannel() {
